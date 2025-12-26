@@ -29,11 +29,15 @@ const Reservation = mongoose.model('Reservation', reservationSchema);
 
 // Crear reserva
 app.post('/api/reservations', async (req, res) => {
-  const { tourId, userId, date, persons, total, paymentMethodId } = req.body;
+  const { tourId, userId, date, persons, totalPrice, paymentMethodId } = req.body;
 
   try {
+    if (!totalPrice) {
+      return res.status(400).json({ success: false, error: "Falta el campo 'totalPrice'" });
+    }
+
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(total * 100),
+      amount: Math.round(totalPrice * 100),
       currency: 'usd',
       payment_method: paymentMethodId,
       confirm: true,
@@ -44,7 +48,7 @@ app.post('/api/reservations', async (req, res) => {
       userId,
       date,
       persons,
-      total,
+      totalPrice,
       status: 'confirmada'
     });
 
