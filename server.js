@@ -14,7 +14,7 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB conectado'))
   .catch(err => console.error('Mongo error:', err));
 
-// Modelo
+// Modelo de Reserva
 const reservationSchema = new mongoose.Schema({
   tourId: String,
   userId: String,
@@ -27,7 +27,105 @@ const reservationSchema = new mongoose.Schema({
 
 const Reservation = mongoose.model('Reservation', reservationSchema);
 
-// Crear reserva
+// 🔥 NUEVO: Modelo de Noticia
+const newsSchema = new mongoose.Schema({
+  titulo: {
+    type: String,
+    required: true
+  },
+  descripcion: {
+    type: String,
+    required: true
+  },
+  contenido: {
+    type: String,
+    required: true
+  },
+  imagenUrl: {
+    type: String,
+    required: true
+  },
+  fecha: {
+    type: Date,
+    default: Date.now
+  },
+  categoria: {
+    type: String,
+    default: 'General'
+  },
+  destacado: {
+    type: Boolean,
+    default: false
+  }
+});
+
+const News = mongoose.model('News', newsSchema);
+
+// 🔥 NUEVO: Crear noticia (para pruebas o admin)
+app.post('/api/news', async (req, res) => {
+  try {
+    const { titulo, descripcion, contenido, imagenUrl, categoria, destacado } = req.body;
+    
+    const news = new News({
+      titulo,
+      descripcion,
+      contenido,
+      imagenUrl,
+      categoria,
+      destacado
+    });
+
+    await news.save();
+    res.status(201).json({ success: true, news });
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// 🔥 NUEVO: Obtener todas las noticias
+app.get('/api/news', async (req, res) => {
+  try {
+    const { destacado, categoria, limit } = req.query;
+    let query = {};
+    
+    if (destacado === 'true') {
+      query.destacado = true;
+    }
+    
+    if (categoria) {
+      query.categoria = categoria;
+    }
+    
+    let newsQuery = News.find(query).sort({ fecha: -1 });
+    
+    if (limit) {
+      newsQuery = newsQuery.limit(parseInt(limit));
+    }
+    
+    const news = await newsQuery;
+    res.json({ success: true, news });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 🔥 NUEVO: Obtener noticia por ID
+app.get('/api/news/:id', async (req, res) => {
+  try {
+    const news = await News.findById(req.params.id);
+    if (!news) {
+      return res.status(404).json({ success: false, error: 'Noticia no encontrada' });
+    }
+    res.json({ success: true, news });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Rutas existentes para reservas...
 app.post('/api/reservations', async (req, res) => {
   const { tourId, userId, date, persons, totalPrice, paymentMethodId } = req.body;
 
@@ -41,6 +139,7 @@ app.post('/api/reservations', async (req, res) => {
       currency: 'usd',
       payment_method: paymentMethodId,
       confirm: true,
+      return_url: 'https://tu-dominio.com/payment-complete'
     });
 
     const reservation = new Reservation({
@@ -61,7 +160,6 @@ app.post('/api/reservations', async (req, res) => {
   }
 });
 
-// Obtener reservas
 app.get('/api/reservations/:userId', async (req, res) => {
   try {
     const reservations = await Reservation.find({ userId: req.params.userId });
@@ -71,6 +169,6 @@ app.get('/api/reservations/:userId', async (req, res) => {
   }
 });
 
-// 🔥 PUERTO CORRECTO PARA RENDER
+// Puerto
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
