@@ -9,10 +9,25 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+if (!process.env.MONGO_URI || !process.env.STRIPE_SECRET_KEY) {
+  console.error('Missing env vars: set MONGO_URI and STRIPE_SECRET_KEY (e.g., in Vercel dashboard).');
+  process.exit(1);
+}
+if (
+  !process.env.MONGO_URI.startsWith('mongodb://') &&
+  !process.env.MONGO_URI.startsWith('mongodb+srv://')
+) {
+  console.error('Invalid MONGO_URI scheme. Must start with "mongodb://" or "mongodb+srv://".');
+  process.exit(1);
+}
+
 // MongoDB
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 5000 })
   .then(() => console.log('MongoDB conectado'))
-  .catch(err => console.error('Mongo error:', err));
+  .catch(err => {
+    console.error('Mongo error:', err);
+    process.exit(1);
+  });
 
 // Modelo de Reserva
 const reservationSchema = new mongoose.Schema({
