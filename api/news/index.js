@@ -1,5 +1,5 @@
 const dbConnect = require('../db');
-const News = require('../models/news');
+const News = require('../models/News');
 
 module.exports = async (req, res) => {
   // Configurar CORS
