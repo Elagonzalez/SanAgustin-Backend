@@ -5,10 +5,9 @@ const newsSchema = new mongoose.Schema({
   titulo: { type: String, required: true, trim: true },
   descripcion: { type: String, required: true, trim: true },
   contenido: { type: String, required: true, trim: true },
-  imagen: { 
-    data: Buffer, 
-    contentType: String, 
-    required: true 
+  imagen: {
+    data: { type: Buffer, required: true },
+    contentType: { type: String, required: true }
   },
   fecha: { type: Date, default: Date.now },
   categoria: { type: String, default: 'General', trim: true },
