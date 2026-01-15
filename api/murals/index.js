@@ -1,6 +1,29 @@
 const dbConnect = require('../db');
 const Mural = require('../models/Mural');
 const multer = require('multer');
+const admin = require('firebase-admin');
+const { v4: uuidv4 } = require('uuid');
+
+// Inicializar Firebase Admin (si aún no está hecho)
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      "type": "service_account",
+      "project_id": process.env.FIREBASE_PROJECT_ID,
+      "private_key_id": process.env.FIREBASE_PRIVATE_KEY_ID,
+      "private_key": process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      "client_email": process.env.FIREBASE_CLIENT_EMAIL,
+      "client_id": process.env.FIREBASE_CLIENT_ID,
+      "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+      "token_uri": "https://oauth2.googleapis.com/token",
+      "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+      "client_x509_cert_url": process.env.FIREBASE_CLIENT_CERT_URL
+    }),
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET
+  });
+}
+
+const bucket = admin.storage().bucket();
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
@@ -25,15 +48,15 @@ module.exports = async (req, res) => {
     await dbConnect();
 
     if (req.method === 'GET') {
-      const { limit, destacado } = req.query;
-      let query = {};
-      if (destacado === 'true') query.destacado = true;
-
-      let muralsQuery = Mural.find(query).sort({ fecha: -1 }).lean();
-      if (limit) muralsQuery = muralsQuery.limit(Math.max(1, parseInt(limit, 10) || 0));
-
-      const murals = await muralsQuery.maxTimeMS(8000);
-      return res.status(200).json({ success: true, murals });
+      const murals = await Mural.find({}).sort({ fecha: -1 }).lean();
+      
+      // Transformar para incluir URL de imagen
+      const muralsWithUrls = murals.map(mural => ({
+        ...mural,
+        imagenUrl: mural.imagenUrl || null
+      }));
+      
+      return res.status(200).json({ success: true, murals: muralsWithUrls });
     }
 
     if (req.method === 'POST') {
@@ -46,15 +69,27 @@ module.exports = async (req, res) => {
         return res.status(400).json({ success: false, error: 'Campos obligatorios: titulo, descripcion, imagen' });
       }
 
+      // Subir imagen a Firebase Storage
+      const fileName = `murals/${uuidv4()}-${file.originalname}`;
+      const fileUpload = bucket.file(fileName);
+
+      await fileUpload.save(file.buffer, {
+        metadata: {
+          contentType: file.mimetype,
+        },
+      });
+
+      // Hacer el archivo público y obtener URL
+      await fileUpload.makePublic();
+      const imagenUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+
+      // Guardar en MongoDB con la URL
       const muralDoc = new Mural({
         titulo,
         descripcion,
         artista: artista || '',
         ubicacion: ubicacion || '',
-        imagen: {
-          data: file.buffer,
-          contentType: file.mimetype
-        },
+        imagenUrl: imagenUrl, // Guardar URL en lugar de buffer
         destacado: destacado === 'true' || destacado === true
       });
 
@@ -66,9 +101,6 @@ module.exports = async (req, res) => {
 
   } catch (error) {
     console.error('API /api/murals error:', error);
-    if (!res.writableEnded) {
-      const isMongoError = /Mongo|ECONNREFUSED|connect timed out/i.test(error.message || '');
-      return res.status(isMongoError ? 503 : 500).json({ success: false, error: error.message });
-    }
+    return res.status(500).json({ success: false, error: error.message });
   }
 };
