@@ -32,19 +32,27 @@ module.exports = async (req, res) => {
       );
 
       const events = await Event.find({ is_active: true })
-        .sort({ fecha: 1 })
-        .lean();
+        .sort({ fecha: 1 });
 
-      // Opcional: si quieres enviar imagen como base64 (igual que murals)
       const serialized = events.map(e => {
+        const eventObj = e.toObject();
         let imagenBase64 = null;
         let imagenContentType = null;
-        if (e.imagen && e.imagen.data) {
-          imagenBase64 = Buffer.from(e.imagen.data).toString('base64');
-          imagenContentType = e.imagen.contentType;
+        
+        if (eventObj.imagen && eventObj.imagen.data) {
+          // Asegúrate de que data sea un Buffer
+          const data = eventObj.imagen.data;
+          if (Buffer.isBuffer(data)) {
+            imagenBase64 = data.toString('base64');
+          } else if (data && data.$binary) {
+            // Si viene en formato MongoDB binario
+            imagenBase64 = data.$binary.base64;
+          }
+          imagenContentType = eventObj.imagen.contentType;
         }
+        
         return {
-          ...e,
+          ...eventObj,
           imagenBase64,
           imagenContentType,
           imagen: undefined,
