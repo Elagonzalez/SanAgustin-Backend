@@ -35,22 +35,38 @@ module.exports = async (req, res) => {
         .sort({ fecha: 1 });
 
       const serialized = events.map(e => {
-        const eventObj = e.toObject();
+        // e puede ser un documento mongoose; toObject() nos sirve para devolver resto de campos
+        const eventObj = e.toObject ? e.toObject() : { ...e };
         let imagenBase64 = null;
-        let imagenContentType = null;
-        
-        if (eventObj.imagen && eventObj.imagen.data) {
-          // Asegúrate de que data sea un Buffer
-          const data = eventObj.imagen.data;
-          if (Buffer.isBuffer(data)) {
-            imagenBase64 = data.toString('base64');
-          } else if (data && data.$binary) {
-            // Si viene en formato MongoDB binario
-            imagenBase64 = data.$binary.base64;
+        let imagenContentType = eventObj.imagen?.contentType ?? null;
+
+        // Intenta obtener el "raw" binario desde el documento mongoose (si existe)
+        const rawData = (e && e.imagen && e.imagen.data) ? e.imagen.data : eventObj.imagen?.data;
+
+        if (rawData) {
+          // 1) Buffer (lo más habitual con mongoose)
+          if (Buffer.isBuffer(rawData)) {
+            imagenBase64 = rawData.toString('base64');
           }
-          imagenContentType = eventObj.imagen.contentType;
+          // 2) bson.Binary (tiene .buffer que suele ser Buffer)
+          else if (rawData.buffer && Buffer.isBuffer(rawData.buffer)) {
+            imagenBase64 = rawData.buffer.toString('base64');
+          }
+          // 3) formato mongoexport { $binary: { base64: '...', subType: '00' } }
+          else if (rawData.$binary && rawData.$binary.base64) {
+            imagenBase64 = rawData.$binary.base64;
+          }
+          // 4) serialized Buffer como { type: 'Buffer', data: [..] } o { data: [...] }
+          else if (Array.isArray(rawData.data)) {
+            imagenBase64 = Buffer.from(rawData.data).toString('base64');
+          }
+          // 5) ya es un string (posiblemente base64 guardado como string)
+          else if (typeof rawData === 'string') {
+            // asumimos que ya es base64 (podrías validar más aquí si quieres)
+            imagenBase64 = rawData;
+          }
         }
-        
+
         return {
           ...eventObj,
           imagenBase64,
