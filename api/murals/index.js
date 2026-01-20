@@ -29,28 +29,28 @@ module.exports = async (req, res) => {
       let query = {};
       if (destacado === 'true') query.destacado = true;
 
-      let muralsQuery = Mural.find(query).sort({ fecha: -1 }).lean();
+      let muralsQuery = Mural.find(query).sort({ fecha: -1 });
       if (limit) muralsQuery = muralsQuery.limit(Math.max(1, parseInt(limit, 10) || 0));
 
-      const murals = await muralsQuery.maxTimeMS(8000);
+      const murals = await muralsQuery;
 
       // Serializar cada mural: agregar imagenBase64 y contentType, quitar buffer
       const serialized = murals.map(m => {
-        // m ya es un objeto plano por .lean()
         let imagenBase64 = null;
         let imagenContentType = null;
+
         if (m.imagen && m.imagen.data) {
-          // m.imagen.data es un Buffer
-          imagenBase64 = Buffer.from(m.imagen.data).toString('base64');
-          imagenContentType = m.imagen.contentType || null;
+          imagenBase64 = m.imagen.data.toString('base64');   // ← Buffer → base64
+          imagenContentType = m.imagen.contentType;
         }
-        // Devolver objeto sin el buffer bruto para reducir tamaño extraño en JSON
-        return {
-          ...m,
-          imagenBase64,
-          imagenContentType,
-          imagen: undefined // o delete m.imagen; si prefieres
-        };
+
+        // Opción 1: devuelves todo menos el buffer crudo
+        const obj = m.toObject(); // o m.toJSON() si prefieres
+        obj.imagenBase64 = imagenBase64;
+        obj.imagenContentType = imagenContentType;
+        delete obj.imagen; // importante: quitas el buffer grande
+
+        return obj;
       });
 
       return res.status(200).json({ success: true, murals: serialized });
