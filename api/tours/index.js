@@ -7,11 +7,25 @@ const storage = multer.memoryStorage();
 const upload = multer({
   storage,
   limits: { fileSize: 6 * 1024 * 1024 }, // 6MB por ejemplo
-  fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (allowed.includes(file.mimetype)) return cb(null, true);
-    return cb(new Error('Tipo de archivo no permitido. Solo JPEG, PNG, WEBP.'));
-  }
+    fileFilter: (req, file, cb) => {
+        const allowed = [
+            'image/jpeg',
+            'image/jpg', 
+            'image/png',
+            'image/webp',
+            'application/octet-stream'  // ← Fallback para móviles
+        ];
+        
+        // Validar también por extensión del archivo
+        const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
+        const ext = file.originalname.toLowerCase().match(/\.[^.]+$/)?.[0];
+        
+        if (allowed.includes(file.mimetype) || allowedExtensions.includes(ext)) {
+            return cb(null, true);
+        }
+        
+        return cb(new Error('Tipo no permitido'));
+    }
 });
 
 // Helper para usar middlewares estilo express (multer) en entorno serverless
