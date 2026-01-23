@@ -1,265 +1,131 @@
-const express = require('express');
-const router = express.Router();
+// tours/index.js
+const dbConnect = require('../db');
+const Tour = require('../models/Tour');
 const multer = require('multer');
-const Tour = require('../models/Tour'); // Ajusta la ruta según tu estructura
 
-// Configuración de Multer para manejo de imágenes en memoria
 const storage = multer.memoryStorage();
 const upload = multer({
-  storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // Límite de 5MB
+  storage,
+  limits: { fileSize: 6 * 1024 * 1024 }, // 6MB por ejemplo
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Tipo de archivo no permitido. Solo JPEG, PNG y WEBP.'));
-    }
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) return cb(null, true);
+    return cb(new Error('Tipo de archivo no permitido. Solo JPEG, PNG, WEBP.'));
   }
 });
 
-// =============================================================================
-// 1. CREAR UN NUEVO TOUR
-// =============================================================================
-router.post('/tours', upload.single('imagen'), async (req, res) => {
+// Helper para usar middlewares estilo express (multer) en entorno serverless
+const runMiddleware = (req, res, fn) => {
+  return new Promise((resolve, reject) => {
+    fn(req, res, (result) => {
+      if (result instanceof Error) return reject(result);
+      return resolve(result);
+    });
+  });
+};
+
+module.exports = async (req, res) => {
+  // CORS simple
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   try {
-    const { titulo, descripcion, precio, duracion, fecha_disponible, max_personas, incluye } = req.body;
+    await dbConnect();
 
-    // Validaciones básicas
-    if (!titulo || !descripcion || !precio || !duracion || !fecha_disponible || !max_personas) {
-      return res.status(400).json({
-        success: false,
-        error: 'Faltan campos obligatorios: titulo, descripcion, precio, duracion, fecha_disponible, max_personas'
-      });
-    }
-
-    // Procesar el campo 'incluye' (puede venir como string JSON o array)
-    let incluyeArray = [];
-    if (incluye) {
+    // ---------------------------
+    // GET /api/tours  -> listar tours activos
+    // ---------------------------
+    if (req.method === 'GET') {
       try {
-        incluyeArray = typeof incluye === 'string' ? JSON.parse(incluye) : incluye;
-      } catch (e) {
-        return res.status(400).json({
-          success: false,
-          error: 'El campo "incluye" debe ser un array válido'
+        const tours = await Tour.find({ is_active: true })
+          .sort({ fecha_disponible: 1 })
+          .select('-__v');
+
+        return res.status(200).json({
+          success: true,
+          count: tours.length,
+          tours
         });
+      } catch (err) {
+        console.error('Error al obtener tours:', err);
+        return res.status(500).json({ success: false, error: 'Error al obtener tours', details: err.message });
       }
     }
 
-    // Procesar imagen
-    let imagenBase64 = null;
-    let imagenContentType = null;
+    // ---------------------------
+    // POST /api/tours -> crear tour (multipart/form-data con campo 'imagen')
+    // ---------------------------
+    if (req.method === 'POST') {
+      // Ejecutar multer para parsear req.file / req.body
+      await runMiddleware(req, res, upload.single('imagen'));
 
-    if (req.file) {
-      imagenBase64 = req.file.buffer.toString('base64');
-      imagenContentType = req.file.mimetype;
-    }
+      const { titulo, descripcion, precio, duracion, fecha_disponible, max_personas, incluye } = req.body;
+      const file = req.file;
 
-    // Crear el tour
-    const nuevoTour = new Tour({
-      titulo: titulo.trim(),
-      descripcion: descripcion.trim(),
-      precio: parseFloat(precio),
-      duracion: duracion.trim(),
-      fecha_disponible: new Date(fecha_disponible),
-      max_personas: parseInt(max_personas),
-      incluye: incluyeArray,
-      is_active: true,
-      imagenBase64,
-      imagenContentType
-    });
-
-    await nuevoTour.save();
-
-    res.status(201).json({
-      success: true,
-      message: 'Tour creado exitosamente',
-      tour: nuevoTour
-    });
-
-  } catch (error) {
-    console.error('Error al crear tour:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error al crear el tour',
-      details: error.message
-    });
-  }
-});
-
-// =============================================================================
-// 2. OBTENER TODOS LOS TOURS ACTIVOS
-// =============================================================================
-router.get('/tours', async (req, res) => {
-  try {
-    const tours = await Tour.find({ is_active: true })
-      .sort({ fecha_disponible: 1 }) // Ordenar por fecha más cercana
-      .select('-__v'); // Excluir el campo __v de mongoose
-
-    res.status(200).json({
-      success: true,
-      count: tours.length,
-      tours: tours
-    });
-
-  } catch (error) {
-    console.error('Error al obtener tours:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error al obtener los tours',
-      details: error.message
-    });
-  }
-});
-
-// =============================================================================
-// 3. OBTENER DETALLES DE UN TOUR ESPECÍFICO
-// =============================================================================
-router.get('/tours/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Validar formato de ID de MongoDB
-    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({
-        success: false,
-        error: 'ID de tour inválido'
-      });
-    }
-
-    const tour = await Tour.findById(id).select('-__v');
-
-    if (!tour) {
-      return res.status(404).json({
-        success: false,
-        error: 'Tour no encontrado'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      tour: tour
-    });
-
-  } catch (error) {
-    console.error('Error al obtener detalles del tour:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error al obtener el tour',
-      details: error.message
-    });
-  }
-});
-
-// =============================================================================
-// 4. ACTUALIZAR UN TOUR (BONUS)
-// =============================================================================
-router.put('/tours/:id', upload.single('imagen'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { titulo, descripcion, precio, duracion, fecha_disponible, max_personas, incluye, is_active } = req.body;
-
-    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({
-        success: false,
-        error: 'ID de tour inválido'
-      });
-    }
-
-    const tour = await Tour.findById(id);
-    if (!tour) {
-      return res.status(404).json({
-        success: false,
-        error: 'Tour no encontrado'
-      });
-    }
-
-    // Actualizar campos si están presentes
-    if (titulo) tour.titulo = titulo.trim();
-    if (descripcion) tour.descripcion = descripcion.trim();
-    if (precio) tour.precio = parseFloat(precio);
-    if (duracion) tour.duracion = duracion.trim();
-    if (fecha_disponible) tour.fecha_disponible = new Date(fecha_disponible);
-    if (max_personas) tour.max_personas = parseInt(max_personas);
-    if (is_active !== undefined) tour.is_active = is_active === 'true' || is_active === true;
-
-    // Actualizar incluye
-    if (incluye) {
-      try {
-        tour.incluye = typeof incluye === 'string' ? JSON.parse(incluye) : incluye;
-      } catch (e) {
+      // Validaciones básicas
+      if (!titulo || !descripcion || !precio || !duracion || !fecha_disponible || !max_personas) {
         return res.status(400).json({
           success: false,
-          error: 'El campo "incluye" debe ser un array válido'
+          error: 'Faltan campos obligatorios: titulo, descripcion, precio, duracion, fecha_disponible, max_personas'
         });
+      }
+
+      // parsea 'incluye' si viene como string JSON
+      let incluyeArray = [];
+      if (incluye) {
+        try {
+          incluyeArray = typeof incluye === 'string' ? JSON.parse(incluye) : incluye;
+        } catch (e) {
+          return res.status(400).json({ success: false, error: 'El campo "incluye" debe ser un array válido' });
+        }
+      }
+
+      // parseos seguros de número y fecha
+      const precioNum = Number(precio);
+      const maxPersonasNum = parseInt(max_personas, 10);
+      const fechaDate = new Date(fecha_disponible);
+      if (isNaN(precioNum) || isNaN(maxPersonasNum) || isNaN(fechaDate.getTime())) {
+        return res.status(400).json({ success: false, error: 'Formato inválido en precio, max_personas o fecha_disponible' });
+      }
+
+      // Preparar documento
+      const tourData = {
+        titulo: titulo.trim(),
+        descripcion: descripcion.trim(),
+        precio: precioNum,
+        duracion: duracion.trim(),
+        fecha_disponible: fechaDate,
+        max_personas: maxPersonasNum,
+        incluye: incluyeArray || [],
+        is_active: true
+      };
+
+      if (file) {
+        tourData.imagenBase64 = file.buffer.toString('base64');
+        tourData.imagenContentType = file.mimetype;
+        // Si tu esquema usa imagen: { data: Buffer, contentType }, podrías setear tourData.imagen = { data: file.buffer, contentType: file.mimetype }
+      }
+
+      try {
+        const nuevo = new Tour(tourData);
+        await nuevo.save();
+
+        return res.status(201).json({ success: true, message: 'Tour creado exitosamente', tour: nuevo });
+      } catch (err) {
+        console.error('Error al guardar tour:', err);
+        return res.status(500).json({ success: false, error: 'Error al crear tour', details: err.message });
       }
     }
 
-    // Actualizar imagen si se proporciona
-    if (req.file) {
-      tour.imagenBase64 = req.file.buffer.toString('base64');
-      tour.imagenContentType = req.file.mimetype;
-    }
-
-    await tour.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Tour actualizado exitosamente',
-      tour: tour
-    });
-
+    // Método no permitido
+    return res.status(405).json({ success: false, error: 'Método no permitido' });
   } catch (error) {
-    console.error('Error al actualizar tour:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error al actualizar el tour',
-      details: error.message
-    });
+    console.error('Error en /api/tours:', error);
+    return res.status(500).json({ success: false, error: error.message });
   }
-});
-
-// =============================================================================
-// 5. DESACTIVAR UN TOUR (SOFT DELETE)
-// =============================================================================
-router.delete('/tours/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({
-        success: false,
-        error: 'ID de tour inválido'
-      });
-    }
-
-    const tour = await Tour.findByIdAndUpdate(
-      id,
-      { is_active: false },
-      { new: true }
-    );
-
-    if (!tour) {
-      return res.status(404).json({
-        success: false,
-        error: 'Tour no encontrado'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Tour desactivado exitosamente',
-      tour: tour
-    });
-
-  } catch (error) {
-    console.error('Error al desactivar tour:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error al desactivar el tour',
-      details: error.message
-    });
-  }
-});
-
-module.exports = router;
+};
